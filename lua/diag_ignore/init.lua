@@ -8,6 +8,7 @@ M.default_config = {
   ignores = {
     python = { 'endline', ' # pyright: ignore[', ']' },
     lua = { 'prevline', '---@diagnostic disable-next-line: ' },
+    go = { 'endline', ' //nolint ', '', ' , ', 'source' },
   },
 }
 
@@ -19,6 +20,7 @@ M.diag_ignore = function()
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
   local diags = vim.diagnostic.get(0, { lnum = lnum })
+  local where, prefix, suffix, joiner, codestr_source = unpack(ignore)
   if diags then
     vim.ui.select(
       diags,
@@ -26,6 +28,9 @@ M.diag_ignore = function()
         prompt = "Ignore diagnostic:",
         format_item = function(diag)
           local codestr = diag.code and (" [" .. diag.code .. "]") or ""
+          if codestr_source == 'source' then
+            codestr = diag.source and (" [" .. diag.source .. "]") or ""
+          end
           return diag.message .. codestr
         end,
       },
@@ -34,7 +39,6 @@ M.diag_ignore = function()
           return
         end
 
-        local where, prefix, suffix, joiner = unpack(ignore)
         if not joiner then
           joiner = ', '
         end
@@ -77,7 +81,11 @@ M.diag_ignore = function()
         end
         local ignorestr = string.sub(line, pto + 1, sfrom - 1)
         local types = ignorestr == "" and {} or vim.split(ignorestr, joiner)
-        table.insert(types, choice.code)
+        if codestr_source == 'source' then
+          table.insert(types, choice.source)
+        else
+          table.insert(types, choice.code)
+        end
         ignorestr = table.concat(types, joiner)
         vim.api.nvim_buf_set_text(0, lnum, pto, lnum, sfrom - 1, { ignorestr })
       end

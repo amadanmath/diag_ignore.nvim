@@ -28,6 +28,7 @@ The default options are:
       ignores = {
         python = { 'endline',  ' # pyright: ignore[', ']' },
         lua =    { 'prevline', '---@diagnostic disable-next-line: ' },
+        go =    { 'endline', ' // nolint ', '', ', ', 'source' },
       },
     },
 <
@@ -35,11 +36,12 @@ The default options are:
 The `ignores` option lists the supported filetypes. Each value is a table:
 
 >lua
-    [filetype] = { type, prefix, suffix, joiner }
+    [filetype] = { type, prefix, suffix, joiner, diagnostic_code }
 <
 
 If `suffix` is `nil`, the default is `''` (empty string).
 If `joiner` is `nil`, the default is `', '` (comma and space).
+If `diagnostic_code` is `nil`, the default is `'code'`.
 
 If `type` is `'endline'`, the annotation will be appended to the current line.
 For example, in Python, invoking `diag_ignore.nvim` on
