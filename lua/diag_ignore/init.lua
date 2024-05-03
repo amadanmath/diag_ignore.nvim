@@ -1,5 +1,4 @@
 ---@class diag_ignore.UserConfig
----@field mapping string
 ---@field ignores table<string, string[]>
 
 local M = {}
@@ -10,7 +9,6 @@ M.default_config = {
     python = { 'endline', ' # pyright: ignore[', ']' },
     lua = { 'prevline', '---@diagnostic disable-next-line: ' },
   },
-  mapping = '<leader>ci',
 }
 
 M.diag_ignore = function()
@@ -98,7 +96,6 @@ M.setup = function(user_config)
   M.config = vim.tbl_deep_extend("force", M.default_config, user_config or {})
   vim.validate({
     ignores = { M.config.ignores, 'table' },
-    mapping = { M.config.mapping, { 'string', 'nil' } },
   })
 
   local validators = {}
@@ -112,14 +109,9 @@ M.setup = function(user_config)
   end
   vim.validate(validators)
 
-  vim.keymap.set('n', '<Plug>diag_ignore', M.diag_ignore, {
-    silent = true, desc = 'Diagnostic: ignore', noremap = true,
+  vim.keymap.set('n', '<Plug>(diag_ignore)', M.diag_ignore, {
+    silent = true, noremap = true,
   })
-  if M.config.mapping then
-    vim.keymap.set('n', M.config.mapping, '<Plug>diag_ignore', {
-      silent = true, desc = 'Diagnostic: ignore', remap = true,
-    })
-  end
 end
 
 return M
