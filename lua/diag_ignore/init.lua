@@ -6,8 +6,7 @@
 ---@field [2] string
 ---@field [3] string | nil
 ---@field [4] string | nil
----@field field string | nil
----@field nojoin boolean | nil
+---@field code string | function | nil
 
 local M = {}
 
@@ -16,8 +15,27 @@ M.default_config = {
   ignores = {
     python = { 'endline', ' # pyright: ignore[', ']' },
     lua = { 'prevline', '---@diagnostic disable-next-line: ' },
+    go = {
+      'prevline',
+      '// nolint: ',
+      code = function(diag)
+        return diag.source
+      end
+    },
   },
 }
+
+local function get_code(ignore, diag)
+  local code_field = ignore.code or 'code'
+  local field_type = type(code_field)
+  local codestr
+  if field_type == "string" then
+    codestr = diag[code_field]
+  elseif field_type == "function" then
+    codestr = code_field(diag)
+  end
+  return codestr
+end
 
 M.diag_ignore = function()
   local ignore = M.config.ignores[vim.bo.filetype]
@@ -27,15 +45,14 @@ M.diag_ignore = function()
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
   local diags = vim.diagnostic.get(0, { lnum = lnum })
-  vim.print(diags)
-  local field = ignore.field or 'code'
   if diags then
     vim.ui.select(
       diags,
       {
         prompt = "Ignore diagnostic:",
         format_item = function(diag)
-          local codestr = diag[field] and (" [" .. diag[field] .. "]") or ""
+          local codestr = get_code(ignore, diag)
+          codestr = codestr and (" [" .. codestr .. "]") or ""
           return diag.message .. codestr
         end,
       },
@@ -87,7 +104,7 @@ M.diag_ignore = function()
         end
         local ignorestr = string.sub(line, pto + 1, sfrom - 1)
         local types = ignorestr == "" and {} or vim.split(ignorestr, joiner)
-        table.insert(types, choice[field])
+        table.insert(types, get_code(ignore, choice))
         ignorestr = table.concat(types, joiner)
         vim.api.nvim_buf_set_text(0, lnum, pto, lnum, sfrom - 1, { ignorestr })
       end
@@ -97,7 +114,6 @@ end
 
 local function is_type_valid(spec)
   return spec == 'prevline'
-      or spec == 'prevlines'
       or spec == 'endline'
 end
 
@@ -113,12 +129,12 @@ M.setup = function(user_config)
   for ft, ignore in pairs(M.config.ignores) do
     if ignore then
       validators[('ignores.%s[1] (type)'):format(ft)] = {
-        ignore[1], is_type_valid, '"prevline", "prevlines" or "endline"'
+        ignore[1], is_type_valid, '"prevline" or "endline"'
       }
       validators[('ignores.%s[2] (prefix)'):format(ft)] = { ignore[2], 'string' }
       validators[('ignores.%s[3] (suffix)'):format(ft)] = { ignore[3], { 'string', 'nil' } }
       validators[('ignores.%s[4] (joiner)'):format(ft)] = { ignore[4], { 'string', 'nil' } }
-      validators[('ignores.%s.field'):format(ft)] = { ignore.field, { 'string', 'nil' } }
+      validators[('ignores.%s.code'):format(ft)] = { ignore.code, { 'string', 'function', 'nil' } }
     end
   end
   vim.validate(validators)

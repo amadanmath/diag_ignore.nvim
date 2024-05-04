@@ -41,11 +41,6 @@ The `ignores` option lists the supported filetypes. Each value is a table:
 If `suffix` is `nil`, the default is `''` (empty string).
 If `joiner` is `nil`, the default is `', '` (comma and space).
 
-Optional key-value fields can be specified, too. Currently only one is
-supported: `field`. By default, `field = 'code'`, which means the contents
-of `diagnostic.code` will be used in the annotation. Some diagnostic
-sources use a different field (e.g. `field = 'source'` may be necessary).
-
 If `type` is `'endline'`, the annotation will be appended to the current line.
 For example, in Python, invoking `diag_ignore.nvim` on
 
@@ -72,6 +67,15 @@ will result in
     ---@diagnostic disable-next-line: exp-in-action
     1
 <
+
+Optional key-value fields can be specified, too. Currently only one is
+supported: `code`, specifying where the diagnostic code can be found. By
+default, `code = 'code'`, which means the contents of `diagnostic.code`
+will be used in the annotation. Some diagnostic sources use a different
+field (e.g. `field = 'source'` may be necessary). For more advanced
+analysis, `code` can be a function taking the `diagnostic` object as
+the sole argument, and returning a string containing the code to be used
+in the annotation.
 
 If an annotation already exists and an additional diagnostic code is selected,
 the code will be inserted into the existing annotation, separated from the
