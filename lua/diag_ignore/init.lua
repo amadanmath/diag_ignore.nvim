@@ -1,5 +1,13 @@
 ---@class diag_ignore.UserConfig
----@field ignores table<string, string[]>
+---@field ignores table<string, diag_ignore.IgnoreSpec> | nil
+
+---@class diag_ignore.IgnoreSpec
+---@field [1] string
+---@field [2] string
+---@field [3] string | nil
+---@field [4] string | nil
+---@field field string | nil
+---@field nojoin boolean | nil
 
 local M = {}
 
@@ -19,13 +27,15 @@ M.diag_ignore = function()
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
   local diags = vim.diagnostic.get(0, { lnum = lnum })
+  vim.print(diags)
+  local field = ignore.field or 'code'
   if diags then
     vim.ui.select(
       diags,
       {
         prompt = "Ignore diagnostic:",
         format_item = function(diag)
-          local codestr = diag.code and (" [" .. diag.code .. "]") or ""
+          local codestr = diag[field] and (" [" .. diag[field] .. "]") or ""
           return diag.message .. codestr
         end,
       },
@@ -77,7 +87,7 @@ M.diag_ignore = function()
         end
         local ignorestr = string.sub(line, pto + 1, sfrom - 1)
         local types = ignorestr == "" and {} or vim.split(ignorestr, joiner)
-        table.insert(types, choice.code)
+        table.insert(types, choice[field])
         ignorestr = table.concat(types, joiner)
         vim.api.nvim_buf_set_text(0, lnum, pto, lnum, sfrom - 1, { ignorestr })
       end
@@ -87,6 +97,7 @@ end
 
 local function is_type_valid(spec)
   return spec == 'prevline'
+      or spec == 'prevlines'
       or spec == 'endline'
 end
 
@@ -101,10 +112,13 @@ M.setup = function(user_config)
   local validators = {}
   for ft, ignore in pairs(M.config.ignores) do
     if ignore then
-      validators[('ignores.%s[1] (type)'):format(ft)] = { ignore[1], is_type_valid, '"prevline" or "endline"' }
+      validators[('ignores.%s[1] (type)'):format(ft)] = {
+        ignore[1], is_type_valid, '"prevline", "prevlines" or "endline"'
+      }
       validators[('ignores.%s[2] (prefix)'):format(ft)] = { ignore[2], 'string' }
       validators[('ignores.%s[3] (suffix)'):format(ft)] = { ignore[3], { 'string', 'nil' } }
       validators[('ignores.%s[4] (joiner)'):format(ft)] = { ignore[4], { 'string', 'nil' } }
+      validators[('ignores.%s.field'):format(ft)] = { ignore.field, { 'string', 'nil' } }
     end
   end
   vim.validate(validators)

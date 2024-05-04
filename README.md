@@ -35,11 +35,16 @@ The default options are:
 The `ignores` option lists the supported filetypes. Each value is a table:
 
 ```lua
-    [filetype] = { type, prefix, suffix, joiner }
+    [filetype] = { type, prefix, suffix, joiner, [options] }
 ```
 
 If `suffix` is `nil`, the default is `''` (empty string).
 If `joiner` is `nil`, the default is `', '` (comma and space).
+
+Optional key-value fields can be specified, too. Currently only one is
+supported: `field`. By default, `field = 'code'`, which means the contents
+of `diagnostic.code` will be used in the annotation. Some diagnostic
+sources use a different field (e.g. `field = 'source'` may be necessary).
 
 If `type` is `'endline'`, the annotation will be appended to the current line.
 For example, in Python, invoking `diag_ignore.nvim` on
