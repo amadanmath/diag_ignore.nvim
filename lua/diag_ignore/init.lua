@@ -15,13 +15,6 @@ M.default_config = {
   ignores = {
     python = { 'endline', ' # pyright: ignore[', ']' },
     lua = { 'prevline', '---@diagnostic disable-next-line: ' },
-    go = {
-      'prevline',
-      '// nolint: ',
-      code = function(diag)
-        return diag.source
-      end
-    },
   },
 }
 
