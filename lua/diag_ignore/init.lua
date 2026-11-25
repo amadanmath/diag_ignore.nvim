@@ -1,5 +1,5 @@
 ---@class diag_ignore.UserConfig
----@field ignores table<string, diag_ignore.IgnoreSpec> | nil
+---@field ignores table<string, diag_ignore.IgnoreSpec | diag_ignore.SourceMap> | nil
 
 ---@class diag_ignore.IgnoreSpec
 ---@field [1] string
@@ -8,15 +8,36 @@
 ---@field [4] string | nil
 ---@field code string | function | nil
 
+---Maps `diagnostic.source` to a spec; `default` is used for unlisted sources.
+---@alias diag_ignore.SourceMap table<string, diag_ignore.IgnoreSpec | false>
+
 local M = {}
 
 ---@type diag_ignore.UserConfig
 M.default_config = {
   ignores = {
-    python = { 'endline', ' # pyright: ignore[', ']' },
+    python = {
+      ty = { 'endline', ' # ty: ignore[', ']' },
+      default = { 'endline', ' # pyright: ignore[', ']' },
+    },
     lua = { 'prevline', '---@diagnostic disable-next-line: ' },
   },
 }
+
+local function is_spec(ignore)
+  return type(ignore) == 'table' and type(ignore[1]) == 'string'
+end
+
+local function get_spec(ignore, diag)
+  if is_spec(ignore) then
+    return ignore
+  end
+  local spec = ignore[diag.source]
+  if spec == nil then
+    spec = ignore.default
+  end
+  return spec or nil
+end
 
 local function get_code(ignore, diag)
   local code_field = ignore.code or 'code'
@@ -37,14 +58,16 @@ M.diag_ignore = function()
   end
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
-  local diags = vim.diagnostic.get(0, { lnum = lnum })
+  local diags = vim.tbl_filter(function(diag)
+    return get_spec(ignore, diag) ~= nil
+  end, vim.diagnostic.get(0, { lnum = lnum }))
   if diags then
     vim.ui.select(
       diags,
       {
         prompt = "Ignore diagnostic:",
         format_item = function(diag)
-          local codestr = get_code(ignore, diag)
+          local codestr = get_code(get_spec(ignore, diag), diag)
           codestr = codestr and (" [" .. codestr .. "]") or ""
           return diag.message .. codestr
         end,
@@ -54,7 +77,8 @@ M.diag_ignore = function()
           return
         end
 
-        local where, prefix, suffix, joiner = unpack(ignore)
+        local spec = get_spec(ignore, choice)
+        local where, prefix, suffix, joiner = unpack(spec)
         if not joiner then
           joiner = ', '
         end
@@ -97,7 +121,7 @@ M.diag_ignore = function()
         end
         local ignorestr = string.sub(line, pto + 1, sfrom - 1)
         local types = ignorestr == "" and {} or vim.split(ignorestr, joiner)
-        table.insert(types, get_code(ignore, choice))
+        table.insert(types, get_code(spec, choice))
         ignorestr = table.concat(types, joiner)
         vim.api.nvim_buf_set_text(0, lnum, pto, lnum, sfrom - 1, { ignorestr })
       end
@@ -113,21 +137,40 @@ end
 ---@param user_config diag_ignore.UserConfig
 M.setup = function(user_config)
   ---@type diag_ignore.UserConfig
-  M.config = vim.tbl_deep_extend("force", M.default_config, user_config or {})
+  user_config = user_config or {}
+  M.config = vim.tbl_deep_extend("force", M.default_config, user_config)
   vim.validate({
     ignores = { M.config.ignores, 'table' },
   })
 
+  -- A spec and a source map must not be merged into each other:
+  -- if the user's entry has a different shape than the default, it replaces it.
+  for ft, ignore in pairs(user_config.ignores or {}) do
+    local default = M.default_config.ignores[ft]
+    if type(ignore) == 'table' and default and is_spec(ignore) ~= is_spec(default) then
+      M.config.ignores[ft] = ignore
+    end
+  end
+
   local validators = {}
+  local function add_validators(name, spec)
+    validators[('%s[1] (type)'):format(name)] = {
+      spec[1], is_type_valid, '"prevline" or "endline"'
+    }
+    validators[('%s[2] (prefix)'):format(name)] = { spec[2], 'string' }
+    validators[('%s[3] (suffix)'):format(name)] = { spec[3], { 'string', 'nil' } }
+    validators[('%s[4] (joiner)'):format(name)] = { spec[4], { 'string', 'nil' } }
+    validators[('%s.code'):format(name)] = { spec.code, { 'string', 'function', 'nil' } }
+  end
   for ft, ignore in pairs(M.config.ignores) do
-    if ignore then
-      validators[('ignores.%s[1] (type)'):format(ft)] = {
-        ignore[1], is_type_valid, '"prevline" or "endline"'
-      }
-      validators[('ignores.%s[2] (prefix)'):format(ft)] = { ignore[2], 'string' }
-      validators[('ignores.%s[3] (suffix)'):format(ft)] = { ignore[3], { 'string', 'nil' } }
-      validators[('ignores.%s[4] (joiner)'):format(ft)] = { ignore[4], { 'string', 'nil' } }
-      validators[('ignores.%s.code'):format(ft)] = { ignore.code, { 'string', 'function', 'nil' } }
+    if is_spec(ignore) then
+      add_validators(('ignores.%s'):format(ft), ignore)
+    elseif ignore then
+      for source, spec in pairs(ignore) do
+        if spec then
+          add_validators(('ignores.%s.%s'):format(ft, source), spec)
+        end
+      end
     end
   end
   vim.validate(validators)

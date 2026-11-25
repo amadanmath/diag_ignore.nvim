@@ -6,7 +6,7 @@ is presented with all the diagnostic messages on the current line. If the user
 selects a diagnostic code, the code will be ignored on the current line.
 
 Currently supported languages are Lua (lua_ls) and Python (basedpyright,
-pyright).
+pyright, ty).
 
 Use your favourite plugin manager to install `diag_ignore.nvim`.
 For example, a minimal plugin spec with Lazy.nvim:
@@ -26,17 +26,32 @@ The default options are:
 >lua
     opts = {
       ignores = {
-        python = { 'endline',  ' # pyright: ignore[', ']' },
+        python = {
+          ty =      { 'endline', ' # ty: ignore[', ']' },
+          default = { 'endline', ' # pyright: ignore[', ']' },
+        },
         lua =    { 'prevline', '---@diagnostic disable-next-line: ' },
       },
     },
 <
 
-The `ignores` option lists the supported filetypes. Each value is a table:
+The `ignores` option lists the supported filetypes. Each value is either a
+single annotation spec:
 
 >lua
     [filetype] = { type, prefix, suffix, joiner, [options] }
 <
+
+or a table mapping diagnostic sources (`diagnostic.source`) to specs, for
+filetypes where several language servers with different annotation syntaxes
+may be in use:
+
+>lua
+    [filetype] = { [source] = spec, ..., default = spec }
+<
+
+The spec under `default` is used for any source that is not listed. Setting a
+source (or `default`) to `false` excludes its diagnostics from the selection.
 
 If `suffix` is `nil`, the default is `''` (empty string).
 If `joiner` is `nil`, the default is `', '` (comma and space).
@@ -81,8 +96,9 @@ If an annotation already exists and an additional diagnostic code is selected,
 the code will be inserted into the existing annotation, separated from the
 existing codes by `joiner`.
 
-The default Python config is based on pyright/basedpyright. If you are using
-mypy, you will have to change the Python config as follows:
+The default Python config uses ty's annotation for ty diagnostics, and
+pyright's for everything else (pyright/basedpyright). If you are using mypy,
+you will have to change the Python config as follows:
 
 >lua
     python = { 'endline',  ' # type: ignore[', ']' },
