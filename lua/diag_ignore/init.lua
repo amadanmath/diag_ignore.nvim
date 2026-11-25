@@ -17,8 +17,9 @@ local M = {}
 M.default_config = {
   ignores = {
     python = {
-      ty = { 'endline', ' # ty: ignore[', ']' },
-      default = { 'endline', ' # pyright: ignore[', ']' },
+      ty = { 'endline', '  # ty: ignore[', ']' },
+      Ruff = { 'endline', '  # noqa: ' },
+      default = { 'endline', '  # pyright: ignore[', ']' },
     },
     lua = { 'prevline', '---@diagnostic disable-next-line: ' },
   },
@@ -51,82 +52,120 @@ local function get_code(ignore, diag)
   return codestr
 end
 
+local function notify(msg, level)
+  vim.notify('diag_ignore: ' .. msg, level)
+end
+
+local function get_line(lnum)
+  return vim.api.nvim_buf_get_lines(0, lnum, lnum + 1, true)[1]
+end
+
+-- Returns the start and end of the last plain-text occurrence of `needle`.
+local function find_last(s, needle)
+  local from, to
+  local init = 1
+  while true do
+    local f, t = s:find(needle, init, true)
+    if not f then
+      return from, to
+    end
+    from, to = f, t
+    init = f + 1
+  end
+end
+
 M.diag_ignore = function()
   local ignore = M.config.ignores[vim.bo.filetype]
   if not ignore then
+    notify(('no annotation configured for filetype "%s"'):format(vim.bo.filetype), vim.log.levels.WARN)
     return
   end
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
+  -- Keep only diagnostics that can be ignored, one per annotation and code.
+  local seen = {}
   local diags = vim.tbl_filter(function(diag)
-    return get_spec(ignore, diag) ~= nil
+    local spec = get_spec(ignore, diag)
+    local code = spec and get_code(spec, diag)
+    if code == nil then
+      return false
+    end
+    code = tostring(code)
+    seen[spec] = seen[spec] or {}
+    if seen[spec][code] then
+      return false
+    end
+    seen[spec][code] = true
+    return true
   end, vim.diagnostic.get(0, { lnum = lnum }))
-  if diags then
-    vim.ui.select(
-      diags,
-      {
-        prompt = "Ignore diagnostic:",
-        format_item = function(diag)
-          local codestr = get_code(get_spec(ignore, diag), diag)
-          codestr = codestr and (" [" .. codestr .. "]") or ""
-          return diag.message .. codestr
-        end,
-      },
-      function(choice)
-        if not choice then
+  if #diags == 0 then
+    notify('no diagnostics to ignore on this line', vim.log.levels.INFO)
+    return
+  end
+
+  vim.ui.select(
+    diags,
+    {
+      prompt = "Ignore diagnostic:",
+      format_item = function(diag)
+        return ('%s [%s]'):format(diag.message, get_code(get_spec(ignore, diag), diag))
+      end,
+    },
+    function(choice)
+      if not choice then
+        return
+      end
+
+      local spec = get_spec(ignore, choice)
+      local code = tostring(get_code(spec, choice))
+      local where, prefix, suffix, joiner = unpack(spec)
+      suffix = suffix or ''
+      joiner = joiner or ', '
+
+      -- Look for an existing annotation; leading whitespace of the prefix is
+      -- not required to match.
+      local search = (prefix:gsub('^%s+', ''))
+      local target = where == 'prevline' and lnum - 1 or lnum
+      local line, pto
+      if target >= 0 then
+        line = get_line(target)
+        _, pto = find_last(line, search)
+      end
+
+      if not pto then
+        local annotation = prefix .. code .. suffix
+        if where == 'prevline' then
+          local indent = get_line(lnum):match('^%s*')
+          vim.api.nvim_buf_set_lines(0, lnum, lnum, true, { indent .. annotation })
+        else
+          vim.api.nvim_buf_set_text(0, lnum, #line, lnum, #line, { annotation })
+        end
+        return
+      end
+
+      local sfrom
+      if suffix == '' then
+        -- Without a suffix, the code list ends at the next comment or at the end of line.
+        sfrom = line:find('%s+#', pto + 1) or (#line + 1)
+      else
+        sfrom = line:find(suffix, pto + 1, true)
+        if not sfrom then
+          notify(('existing annotation is missing "%s"'):format(suffix), vim.log.levels.ERROR)
           return
         end
-
-        local spec = get_spec(ignore, choice)
-        local where, prefix, suffix, joiner = unpack(spec)
-        if not joiner then
-          joiner = ', '
-        end
-        if not suffix then
-          suffix = ''
-        end
-
-        local pto, sfrom, col, line
-        if where == 'prevline' then
-          if lnum > 0 then
-            line = vim.api.nvim_buf_get_lines(0, lnum - 1, lnum, true)[1]
-            _, pto = line:find(prefix, 1, true)
-          end
-          if pto then
-            lnum = lnum - 1
-          else
-            line = vim.api.nvim_buf_get_lines(0, lnum, lnum + 1, true)[1]
-            _, col = line:find('^ *')
-            local indent = line:sub(1, col)
-            line = indent .. prefix .. suffix
-            vim.api.nvim_buf_set_lines(0, lnum, lnum, true, { line })
-          end
-        elseif where == 'endline' then
-          line = vim.api.nvim_buf_get_lines(0, lnum, lnum + 1, true)[1]
-          _, pto = line:find(prefix, 1, true)
-          if not pto then
-            col = line:len()
-            vim.api.nvim_buf_set_text(0, lnum, col, lnum, col, { prefix .. suffix })
-            line = line .. prefix .. suffix
-          end
-        end
-
-        if not pto then
-          pto = col + prefix:len()
-        end
-        if suffix == '' then
-          sfrom = line:len() + 1
-        else
-          sfrom, _ = line:find(suffix, pto + 1, true)
-        end
-        local ignorestr = string.sub(line, pto + 1, sfrom - 1)
-        local types = ignorestr == "" and {} or vim.split(ignorestr, joiner)
-        table.insert(types, get_code(spec, choice))
-        ignorestr = table.concat(types, joiner)
-        vim.api.nvim_buf_set_text(0, lnum, pto, lnum, sfrom - 1, { ignorestr })
       end
-    )
-  end
+      local existing = line:sub(pto + 1, sfrom - 1)
+      local codes = existing == '' and {} or vim.split(existing, joiner, { plain = true })
+      for _, c in ipairs(codes) do
+        if vim.trim(c) == code then
+          notify(('"%s" is already ignored'):format(code), vim.log.levels.INFO)
+          return
+        end
+      end
+      table.insert(codes, code)
+      vim.api.nvim_buf_set_text(0, target, pto, target, sfrom - 1, { table.concat(codes, joiner) })
+    end
+  )
 end
 
 local function is_type_valid(spec)
@@ -134,14 +173,22 @@ local function is_type_valid(spec)
       or spec == 'endline'
 end
 
+-- `vim.validate{...}` is deprecated since Nvim 0.11, but the replacement
+-- signature does not exist before it.
+local function validate(name, value, validator, optional, message)
+  if vim.fn.has('nvim-0.11') == 1 then
+    vim.validate(name, value, validator, optional, message)
+  else
+    vim.validate({ [name] = { value, validator, message or optional } })
+  end
+end
+
 ---@param user_config diag_ignore.UserConfig
 M.setup = function(user_config)
   ---@type diag_ignore.UserConfig
   user_config = user_config or {}
   M.config = vim.tbl_deep_extend("force", M.default_config, user_config)
-  vim.validate({
-    ignores = { M.config.ignores, 'table' },
-  })
+  validate('ignores', M.config.ignores, 'table')
 
   -- A spec and a source map must not be merged into each other:
   -- if the user's entry has a different shape than the default, it replaces it.
@@ -152,28 +199,24 @@ M.setup = function(user_config)
     end
   end
 
-  local validators = {}
-  local function add_validators(name, spec)
-    validators[('%s[1] (type)'):format(name)] = {
-      spec[1], is_type_valid, '"prevline" or "endline"'
-    }
-    validators[('%s[2] (prefix)'):format(name)] = { spec[2], 'string' }
-    validators[('%s[3] (suffix)'):format(name)] = { spec[3], { 'string', 'nil' } }
-    validators[('%s[4] (joiner)'):format(name)] = { spec[4], { 'string', 'nil' } }
-    validators[('%s.code'):format(name)] = { spec.code, { 'string', 'function', 'nil' } }
+  local function validate_spec(name, spec)
+    validate(('%s[1] (type)'):format(name), spec[1], is_type_valid, false, '"prevline" or "endline"')
+    validate(('%s[2] (prefix)'):format(name), spec[2], 'string')
+    validate(('%s[3] (suffix)'):format(name), spec[3], 'string', true)
+    validate(('%s[4] (joiner)'):format(name), spec[4], 'string', true)
+    validate(('%s.code'):format(name), spec.code, { 'string', 'function' }, true)
   end
   for ft, ignore in pairs(M.config.ignores) do
     if is_spec(ignore) then
-      add_validators(('ignores.%s'):format(ft), ignore)
+      validate_spec(('ignores.%s'):format(ft), ignore)
     elseif ignore then
       for source, spec in pairs(ignore) do
         if spec then
-          add_validators(('ignores.%s.%s'):format(ft, source), spec)
+          validate_spec(('ignores.%s.%s'):format(ft, source), spec)
         end
       end
     end
   end
-  vim.validate(validators)
 
   vim.keymap.set('n', '<Plug>(diag_ignore)', M.diag_ignore, {
     silent = true, noremap = true,

@@ -6,7 +6,7 @@ is presented with all the diagnostic messages on the current line. If the user
 selects a diagnostic code, the code will be ignored on the current line.
 
 Currently supported languages are Lua (lua_ls) and Python (basedpyright,
-pyright, ty).
+pyright, ty, Ruff).
 
 Use your favourite plugin manager to install `diag_ignore.nvim`.
 For example, a minimal plugin spec with Lazy.nvim:
@@ -27,8 +27,9 @@ The default options are:
     opts = {
       ignores = {
         python = {
-          ty =      { 'endline', ' # ty: ignore[', ']' },
-          default = { 'endline', ' # pyright: ignore[', ']' },
+          ty =      { 'endline', '  # ty: ignore[', ']' },
+          Ruff =    { 'endline', '  # noqa: ' },
+          default = { 'endline', '  # pyright: ignore[', ']' },
         },
         lua =    { 'prevline', '---@diagnostic disable-next-line: ' },
       },
@@ -66,7 +67,7 @@ For example, in Python, invoking `diag_ignore.nvim` on
 will result in
 
 ```python
-    1 # pyright: ignore[reportUnusedExpression]
+    1  # pyright: ignore[reportUnusedExpression]
 ```
 
 If `type` is `'prevline'`, the annotation will be inserted on the previous line.
@@ -87,19 +88,22 @@ Optional key-value fields can be specified, too. Currently only one is
 supported: `code`, specifying where the diagnostic code can be found. By
 default, `code = 'code'`, which means the contents of `diagnostic.code`
 will be used in the annotation. Some diagnostic sources use a different
-field (e.g. `field = 'source'` may be necessary). For more advanced
+field (e.g. `code = 'source'` may be necessary). For more advanced
 analysis, `code` can be a function taking the `diagnostic` object as
 the sole argument, and returning a string containing the code to be used
 in the annotation.
 
 If an annotation already exists and an additional diagnostic code is selected,
 the code will be inserted into the existing annotation, separated from the
-existing codes by `joiner`.
+existing codes by `joiner`. When looking for an existing annotation, leading
+whitespace in `prefix` is ignored. If `suffix` is empty, the list of codes
+extends to the next `#` comment or the end of the line. Diagnostics without a
+code cannot be ignored and are not offered.
 
-The default Python config uses ty's annotation for ty diagnostics, and
-pyright's for everything else (pyright/basedpyright). If you are using mypy,
+The default Python config uses ty's annotation for ty diagnostics, `noqa` for
+Ruff, and pyright's for everything else (pyright/basedpyright). If you are using mypy,
 you will have to change the Python config as follows:
 
 ```lua
-    python = { 'endline',  ' # type: ignore[', ']' },
+    python = { 'endline',  '  # type: ignore[', ']' },
 ```
